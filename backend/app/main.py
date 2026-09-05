@@ -75,7 +75,30 @@ def confirm_order(order_id: int):
             detail=f"Amount exceeds Rs.{SPEND_CAP_PAISE / 100:.0f} spend cap - blocked",
         )
 
-    razorpay_order = create_razorpay_order(order["amount_paise"], receipt=f"order{order_id}")
+    # Atomically claim the order before calling Razorpay - if two requests race here,
+    # only one UPDATE can match 'pending_confirmation' and change rowcount to 1
+    claim = conn.execute(
+        "UPDATE orders SET status = 'confirming', updated_at = datetime('now') "
+        "WHERE id = ? AND status = 'pending_confirmation'",
+        (order_id,),
+    )
+    conn.commit()
+    if claim.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Order is already being confirmed or was already processed")
+
+    try:
+        razorpay_order = create_razorpay_order(order["amount_paise"], receipt=f"order{order_id}")
+    except Exception as e:
+        conn.execute(
+            "UPDATE orders SET status = 'pending_confirmation', updated_at = datetime('now') WHERE id = ?",
+            (order_id,),
+        )
+        conn.commit()
+        conn.close()
+        log_audit(actor="system", action="razorpay_order_create_failed", details=str(e), order_id=order_id)
+        raise HTTPException(status_code=502, detail="Could not reach Razorpay - please try again")
+
     conn.execute(
         "UPDATE orders SET razorpay_order_id = ?, status = 'created', updated_at = datetime('now') WHERE id = ?",
         (razorpay_order["id"], order_id),
