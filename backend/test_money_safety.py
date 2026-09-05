@@ -38,6 +38,12 @@ def test_over_stock_quantity():
     check("over-stock quantity is rejected", "only" in result.lower() and "in stock" in result.lower())
 
 
+def test_cross_sell_suggestion():
+    # product_id 7 = Mechanical Keyboard, paired with product_id 8 = Wireless Mouse
+    result = propose_order(product_id=7, quantity=1)
+    check("cross-sell suggestion mentions the paired product", "wireless mouse" in result.lower())
+
+
 def test_over_cap_block():
     propose_order(product_id=7, quantity=1)  # Mechanical Keyboard, Rs.2999 - over the Rs.2000 cap
     order_id = last_order_id()
@@ -62,6 +68,7 @@ def test_tampered_signature():
 if __name__ == "__main__":
     test_invalid_product_id()
     test_over_stock_quantity()
+    test_cross_sell_suggestion()
     test_over_cap_block()
     test_tampered_signature()
     passed = sum(1 for _, ok in results if ok)

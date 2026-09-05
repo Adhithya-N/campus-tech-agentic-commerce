@@ -10,6 +10,7 @@ A conversational shopping assistant that lets a customer browse a merchant's cat
 - A separate, deterministic backend endpoint re-validates the amount against a hard spend cap before creating a real Razorpay test-mode order.
 - Payment success is verified **server-side** via Razorpay signature verification — a forged "payment succeeded" callback is rejected, not trusted.
 - Every action (searches, proposals, blocks, payments, failures) is written to an audit trail, visible live in the UI.
+- **Cross-sell**: when a customer drafts an order for a product with a natural pairing (e.g. Mechanical Keyboard -> Wireless Mouse), the assistant suggests the complementary item. The *pairing* is a deterministic merchant-configured rule (not left to the LLM to guess); the LLM only decides how to phrase the suggestion conversationally. Directly matches Track 1's named "Upsell & cross-sell agent" direction.
 
 ## The bar this meets
 - **Bounded**: a hard spend cap (₹2,000) blocks any order above it before Razorpay is even called.
@@ -87,7 +88,7 @@ This is the specific, honest place the AI adds measurable value: constraint-base
 
 ## Known limitations
 - **No payment webhook.** Payment success is confirmed when the browser calls back after Checkout - if a customer closes the tab before that call fires, Razorpay could capture a payment that never gets reflected as `paid` locally. A production version needs a Razorpay webhook as the source of truth, with the current client-side verification kept only as a fast-path UX optimization.
-- **No authentication.** Any client can call any order endpoint. Acceptable for a single-session demo, not for a real multi-customer merchant.
+- **No authentication.** Any client can call any order endpoint (a basic in-memory rate limiter on the money-moving endpoints protects against request bursts, but there is no identity/authorization layer). Acceptable for a single-session demo, not for a real multi-customer merchant.
 - **Chat sessions are in-memory.** Conversation history resets on server restart and would not survive multiple server processes.
 - **Single hardcoded merchant catalog.** No real catalog ingestion or multi-merchant support.
 

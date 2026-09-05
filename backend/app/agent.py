@@ -58,6 +58,20 @@ def search_catalog(query: str) -> str:
     )
 
 
+# Deterministic merchant-configured cross-sell pairings (product_id -> suggested
+# product_id) - this is a business rule, not something left to the LLM to guess
+# fresh each time. The LLM only decides how to phrase the suggestion.
+CROSS_SELL_PAIRS = {
+    1: 3,  # Wireless Earbuds -> 20W Fast Charger
+    2: 4,  # Phone Case -> USB-C Cable
+    3: 4,  # 20W Fast Charger -> USB-C Cable
+    4: 3,  # USB-C Cable -> 20W Fast Charger
+    5: 7,  # Laptop Sleeve -> Mechanical Keyboard
+    7: 8,  # Mechanical Keyboard -> Wireless Mouse
+    8: 7,  # Wireless Mouse -> Mechanical Keyboard
+}
+
+
 def propose_order(product_id: int, quantity: int) -> str:
     """Draft an order for the customer to review. This never charges any money -
     it only creates a pending order that the customer must explicitly confirm and
@@ -83,6 +97,22 @@ def propose_order(product_id: int, quantity: int) -> str:
     )
     order_id = cursor.lastrowid
     conn.commit()
+
+    cross_sell_note = ""
+    cross_sell_id = CROSS_SELL_PAIRS.get(product_id)
+    if cross_sell_id:
+        suggested = conn.execute("SELECT * FROM products WHERE id = ?", (cross_sell_id,)).fetchone()
+        if suggested and suggested["stock"] > 0:
+            cross_sell_note = (
+                f" Customers who buy this often also get the {suggested['name']} "
+                f"(Rs.{suggested['price_paise'] / 100:.2f}) - want to add that too?"
+            )
+            log_audit(
+                actor="agent",
+                action="cross_sell_suggested",
+                details=f"order#{order_id}: suggested #{cross_sell_id} {suggested['name']}",
+                order_id=order_id,
+            )
     conn.close()
 
     over_cap = amount_paise > SPEND_CAP_PAISE
@@ -109,7 +139,7 @@ def propose_order(product_id: int, quantity: int) -> str:
     )
     return (
         f"Order #{order_id} drafted: {quantity}x {product['name']} = Rs.{amount_paise / 100:.2f}. "
-        f"Please confirm on the checkout screen to pay.{cap_note}"
+        f"Please confirm on the checkout screen to pay.{cap_note}{cross_sell_note}"
     )
 
 

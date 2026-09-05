@@ -1,12 +1,33 @@
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.agent import run_chat
 from app.database import get_connection, init_db, log_audit
 from app.payments import RAZORPAY_KEY_ID, SPEND_CAP_PAISE, create_razorpay_order, verify_payment_signature
+
+RATE_LIMIT_MAX_REQUESTS = 10
+RATE_LIMIT_WINDOW_SECONDS = 60
+_rate_limit_state: dict[str, list[float]] = defaultdict(list)
+
+
+def rate_limit(request: Request) -> None:
+    """Simple in-memory fixed-window rate limit per client IP, applied to the
+    money-moving endpoints. Not distributed/production-grade, but demonstrates
+    the guardrail against a burst of automated requests hitting a single process."""
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    timestamps = _rate_limit_state[client_ip]
+    while timestamps and timestamps[0] < window_start:
+        timestamps.pop(0)
+    if len(timestamps) >= RATE_LIMIT_MAX_REQUESTS:
+        raise HTTPException(status_code=429, detail="Too many requests - please slow down")
+    timestamps.append(now)
 
 
 @asynccontextmanager
@@ -50,7 +71,7 @@ def chat(payload: ChatRequest):
     return run_chat(payload.session_id, payload.message)
 
 
-@app.post("/api/orders/{order_id}/confirm")
+@app.post("/api/orders/{order_id}/confirm", dependencies=[Depends(rate_limit)])
 def confirm_order(order_id: int):
     conn = get_connection()
     order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
@@ -115,7 +136,7 @@ def confirm_order(order_id: int):
     }
 
 
-@app.post("/api/orders/{order_id}/verify-payment")
+@app.post("/api/orders/{order_id}/verify-payment", dependencies=[Depends(rate_limit)])
 def verify_payment(order_id: int, payload: VerifyPaymentRequest):
     conn = get_connection()
     order = conn.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
