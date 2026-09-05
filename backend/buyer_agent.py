@@ -76,8 +76,12 @@ def run_buyer(goal: str) -> None:
         )
     else:
         detail = confirm.json().get("detail")
-        print(f"[buyer agent] BLOCKED by the spend-cap gate (HTTP {confirm.status_code}): {detail}")
-        print("[buyer agent] the same deterministic gate that protects the human UI just blocked an autonomous AI buyer too.")
+        if confirm.status_code == 400:
+            print(f"[buyer agent] BLOCKED by the spend-cap gate (HTTP 400): {detail}")
+            print("[buyer agent] the same deterministic gate that protects the human UI just blocked an autonomous AI buyer too.")
+        else:
+            print(f"[buyer agent] Order confirmation failed (HTTP {confirm.status_code}): {detail}")
+            print("[buyer agent] this is not a spend-cap block - likely a transient network issue. Retrying the command usually resolves it.")
 
 
 if __name__ == "__main__":
